@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BR_PDF_READER VERSION 1.4.3 LANGUAGES CXX)
+project(BR_PDF_READER VERSION 1.4.4 LANGUAGES CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "BR PDF READER targets Windows 10/11 x64.")
@@ -32,7 +32,7 @@ target_compile_definitions(BR_PDF_READER PRIVATE
   _WIN32_WINNT=0x0A00
   WINVER=0x0A00
   GLEW_STATIC
-  BR_PDF_READER_VERSION="1.4.3"
+  BR_PDF_READER_VERSION="1.4.4"
 )
 
 target_link_libraries(BR_PDF_READER PRIVATE
