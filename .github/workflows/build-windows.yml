@@ -1,1 +1,46 @@
+name: Build BR PDF READER
 
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout BR PDF READER
+        uses: actions/checkout@v4
+
+      - name: Fetch stable Resolume FFGL SDK
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force external | Out-Null
+          git clone --depth 1 --branch v2.2 https://github.com/resolume/ffgl.git external/ffgl
+
+      - name: Configure
+        shell: powershell
+        run: |
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        shell: powershell
+        run: |
+          cmake --build build --config Release --target BR_PDF_READER
+
+      - name: Find and package DLL
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $dll = Get-ChildItem -Path build -Recurse -Filter BR_PDF_READER_FFGL.dll | Select-Object -First 1
+          if (-not $dll) { throw "BR_PDF_READER_FFGL.dll was not produced." }
+          Copy-Item $dll.FullName dist/BR_PDF_READER_FFGL.dll
+          Compress-Archive -Path dist/BR_PDF_READER_FFGL.dll -DestinationPath dist/BR-PDF-READER-Windows-x64.zip
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BR-PDF-READER-Windows-x64
+          path: dist/BR-PDF-READER-Windows-x64.zip
+          if-no-files-found: error
