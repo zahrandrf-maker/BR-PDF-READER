@@ -29,7 +29,7 @@ static CFFGLPluginInfo PluginInfo(
   1, 0,
   FF_SOURCE,
   "PDF reader and slideshow source for Resolume",
-  "BR PDF Reader V1.4.3"
+  "BR PDF Reader V1.4.4"
 );
 
 static const char* kVertexShader = R"(#version 410 core
@@ -45,13 +45,17 @@ void main() {
 static const char* kFragmentShader = R"(#version 410 core
 uniform sampler2D currentTexture;
 uniform sampler2D previousTexture;
+
 uniform float currentAspect;
 uniform float previousAspect;
 uniform float outputAspect;
+
 uniform int displayMode;
 uniform int hasPrevious;
+
 uniform int transitionMode;
 uniform float transitionProgress;
+
 uniform float zoomValue;
 uniform float positionX;
 uniform float positionY;
@@ -59,52 +63,43 @@ uniform float positionY;
 in vec2 uv;
 out vec4 fragColor;
 
-// Convert output-space UV into source-space UV first.
-// Then zoom/pan is applied in source space, so Position X/Y always
-// adapts to the real visible area of the current PDF page.
+vec2 transformedUV(vec2 p) {
+  float z = max(zoomValue, 0.05);
+  vec2 center = vec2(
+    0.5 + positionX * 0.5,
+    0.5 + positionY * 0.5
+  );
+
+  return (p - center) / z + vec2(0.5);
+}
+
 vec4 samplePage(sampler2D tex, float sourceAspect, vec2 p) {
-  vec2 q = p;
+  vec2 q = transformedUV(p);
   bool outside = false;
 
-  // DISPLAY MAPPING
   // 0 = FIT
   if (displayMode == 0) {
     if (outputAspect > sourceAspect) {
-      float contentWidth = sourceAspect / outputAspect;
-      outside = outside || abs(p.x - 0.5) > 0.5 * contentWidth;
-      q.x = (p.x - (0.5 - 0.5 * contentWidth)) / max(contentWidth, 0.0001);
+      float width = sourceAspect / outputAspect;
+      outside = outside || abs(q.x - 0.5) > 0.5 * width;
+      q.x = (q.x - (0.5 - 0.5 * width)) / max(width, 0.0001);
     } else {
-      float contentHeight = outputAspect / sourceAspect;
-      outside = outside || abs(p.y - 0.5) > 0.5 * contentHeight;
-      q.y = (p.y - (0.5 - 0.5 * contentHeight)) / max(contentHeight, 0.0001);
+      float height = outputAspect / sourceAspect;
+      outside = outside || abs(q.y - 0.5) > 0.5 * height;
+      q.y = (q.y - (0.5 - 0.5 * height)) / max(height, 0.0001);
     }
   }
+
   // 1 = FILL
   else if (displayMode == 1) {
     if (outputAspect > sourceAspect) {
-      q.y = (p.y - 0.5) * (sourceAspect / outputAspect) + 0.5;
+      q.y = (q.y - 0.5) * (sourceAspect / outputAspect) + 0.5;
     } else {
-      q.x = (p.x - 0.5) * (outputAspect / sourceAspect) + 0.5;
+      q.x = (q.x - 0.5) * (outputAspect / sourceAspect) + 0.5;
     }
   }
-  // 2 = STRETCH -> q stays equal to p.
 
-  // DYNAMIC ZOOM + PAN
-  // At zoom 1.0, there is no available pan.
-  // As zoom increases, the pan range grows automatically so ±1.0
-  // always reaches the actual edge of the document.
-  float z = max(zoomValue, 0.05);
-  vec2 visibleSpan = vec2(1.0 / z);
-
-  // Maximum movement of the source-window center before its edge
-  // touches the edge of the PDF page.
-  vec2 maxPan = max(vec2(0.0), vec2(0.5) - visibleSpan * 0.5);
-
-  // Resolume slider remains normalized -1..+1, but the actual movement
-  // is dynamically scaled by zoom/document space.
-  vec2 pan = vec2(positionX, positionY) * maxPan;
-
-  q = (q - vec2(0.5)) / z + vec2(0.5) - pan;
+  // 2 = STRETCH: use transformed UV directly.
 
   outside = outside ||
             q.x < 0.0 || q.x > 1.0 ||
@@ -113,21 +108,38 @@ vec4 samplePage(sampler2D tex, float sourceAspect, vec2 p) {
   if (outside)
     return vec4(0.0);
 
-  // PDF/WIC rows are top-to-bottom.
   return texture(tex, vec2(q.x, 1.0 - q.y));
 }
 
 void main() {
-  float t = smoothstep(0.0, 1.0, clamp(transitionProgress, 0.0, 1.0));
+  float t = smoothstep(
+    0.0,
+    1.0,
+    clamp(transitionProgress, 0.0, 1.0)
+  );
 
   if (hasPrevious == 0 || transitionMode == 0 || t >= 1.0) {
-    fragColor = samplePage(currentTexture, currentAspect, uv);
+    fragColor = samplePage(
+      currentTexture,
+      currentAspect,
+      uv
+    );
     return;
   }
 
   if (transitionMode == 1) {
-    vec4 oldColor = samplePage(previousTexture, previousAspect, uv);
-    vec4 newColor = samplePage(currentTexture, currentAspect, uv);
+    vec4 oldColor = samplePage(
+      previousTexture,
+      previousAspect,
+      uv
+    );
+
+    vec4 newColor = samplePage(
+      currentTexture,
+      currentAspect,
+      uv
+    );
+
     fragColor = mix(oldColor, newColor, t);
     return;
   }
@@ -135,13 +147,37 @@ void main() {
   vec2 oldOffset = vec2(0.0);
   vec2 newOffset = vec2(0.0);
 
-  if (transitionMode == 2) { oldOffset = vec2(0.0, t);     newOffset = vec2(0.0, t - 1.0); }
-  if (transitionMode == 3) { oldOffset = vec2(0.0, -t);    newOffset = vec2(0.0, 1.0 - t); }
-  if (transitionMode == 4) { oldOffset = vec2(-t, 0.0);    newOffset = vec2(1.0 - t, 0.0); }
-  if (transitionMode == 5) { oldOffset = vec2(t, 0.0);     newOffset = vec2(t - 1.0, 0.0); }
+  if (transitionMode == 2) {
+    oldOffset = vec2(0.0, t);
+    newOffset = vec2(0.0, t - 1.0);
+  }
 
-  vec4 oldColor = samplePage(previousTexture, previousAspect, uv - oldOffset);
-  vec4 newColor = samplePage(currentTexture, currentAspect, uv - newOffset);
+  if (transitionMode == 3) {
+    oldOffset = vec2(0.0, -t);
+    newOffset = vec2(0.0, 1.0 - t);
+  }
+
+  if (transitionMode == 4) {
+    oldOffset = vec2(-t, 0.0);
+    newOffset = vec2(1.0 - t, 0.0);
+  }
+
+  if (transitionMode == 5) {
+    oldOffset = vec2(t, 0.0);
+    newOffset = vec2(t - 1.0, 0.0);
+  }
+
+  vec4 oldColor = samplePage(
+    previousTexture,
+    previousAspect,
+    uv - oldOffset
+  );
+
+  vec4 newColor = samplePage(
+    currentTexture,
+    currentAspect,
+    uv - newOffset
+  );
 
   fragColor = oldColor + newColor * (1.0 - oldColor.a);
 }
