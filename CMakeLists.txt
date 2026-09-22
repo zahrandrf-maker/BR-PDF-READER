@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BR_PDF_READER VERSION 1.0.0 LANGUAGES CXX)
+project(BR_PDF_READER VERSION 1.1.0 LANGUAGES CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "BR PDF READER V1 targets Windows 10/11 x64.")
@@ -9,10 +9,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Resolume FFGL SDK is cloned by GitHub Actions.
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/ffgl/CMakeLists.txt")
-  message(FATAL_ERROR "Missing external/ffgl. Run scripts/bootstrap.ps1 or use GitHub Actions.")
+  message(FATAL_ERROR "Missing external/ffgl/CMakeLists.txt. GitHub Actions should clone the current Resolume FFGL SDK before Configure.")
 endif()
+
+# Current Resolume FFGL SDK uses GLEW on Windows.
+find_package(GLEW REQUIRED)
 
 set(FFGL_BUILD_EXAMPLE_PLUGINS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/ffgl ffgl-build EXCLUDE_FROM_ALL)
@@ -29,14 +31,17 @@ target_compile_definitions(BR_PDF_READER PRIVATE
   NOMINMAX
   _WIN32_WINNT=0x0A00
   WINVER=0x0A00
-  BR_PDF_READER_VERSION="1.0.0"
+  GLEW_STATIC
+  BR_PDF_READER_VERSION="1.1.0"
 )
 
 target_link_libraries(BR_PDF_READER PRIVATE
   ffgl::sdk
+  GLEW::GLEW
   windowsapp
   runtimeobject
   comdlg32
+  shcore
   opengl32
 )
 

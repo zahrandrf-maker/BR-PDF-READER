@@ -1,5 +1,7 @@
 # BR PDF READER by Belajar Resolume
 
+**V1.1 build fix:** uses the current Resolume FFGL SDK layout (the older `v2.2` tag does not contain a root `CMakeLists.txt`) and installs GLEW automatically in GitHub Actions.
+
 A focused FFGL source plugin for loading and presenting PDF documents directly inside Resolume on Windows.
 
 ## V1 controls
