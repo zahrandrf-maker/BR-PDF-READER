@@ -3,12 +3,23 @@
 #include <shobjidl.h>
 
 #include "BRPdfReader.h"
+#include "BRThumbnail.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 using namespace ffglex;
+
+
+// Static embedded thumbnail exposed to FFGL hosts such as Resolume.
+// It is available before an instance is created, so the Source/clip can show
+// the BR PDF Reader artwork immediately when dragged into the composition.
+static CFFGLThumbnailInfo ThumbnailInfo(
+  BR_THUMBNAIL_WIDTH,
+  BR_THUMBNAIL_HEIGHT,
+  BR_THUMBNAIL_PIXELS
+);
 
 static CFFGLPluginInfo PluginInfo(
   PluginFactory<BRPdfReader>,
@@ -18,7 +29,7 @@ static CFFGLPluginInfo PluginInfo(
   1, 0,
   FF_SOURCE,
   "PDF reader and slideshow source for Resolume",
-  "BR PDF Reader V1.4.1"
+  "BR PDF Reader V1.4.3"
 );
 
 static const char* kVertexShader = R"(#version 410 core
@@ -48,37 +59,61 @@ uniform float positionY;
 in vec2 uv;
 out vec4 fragColor;
 
-vec2 transformCoord(vec2 p) {
-  float z = max(zoomValue, 0.05);
-  vec2 center = vec2(0.5 + positionX * 0.5, 0.5 + positionY * 0.5);
-  return (p - center) / z + vec2(0.5);
-}
-
+// Convert output-space UV into source-space UV first.
+// Then zoom/pan is applied in source space, so Position X/Y always
+// adapts to the real visible area of the current PDF page.
 vec4 samplePage(sampler2D tex, float sourceAspect, vec2 p) {
-  vec2 q = transformCoord(p);
+  vec2 q = p;
   bool outside = false;
 
+  // DISPLAY MAPPING
+  // 0 = FIT
   if (displayMode == 0) {
     if (outputAspect > sourceAspect) {
-      float w = sourceAspect / outputAspect;
-      outside = outside || abs(q.x - 0.5) > 0.5 * w;
-      q.x = (q.x - (0.5 - 0.5 * w)) / max(w, 0.0001);
+      float contentWidth = sourceAspect / outputAspect;
+      outside = outside || abs(p.x - 0.5) > 0.5 * contentWidth;
+      q.x = (p.x - (0.5 - 0.5 * contentWidth)) / max(contentWidth, 0.0001);
     } else {
-      float h = outputAspect / sourceAspect;
-      outside = outside || abs(q.y - 0.5) > 0.5 * h;
-      q.y = (q.y - (0.5 - 0.5 * h)) / max(h, 0.0001);
-    }
-  } else if (displayMode == 1) {
-    if (outputAspect > sourceAspect) {
-      q.y = (q.y - 0.5) * (sourceAspect / outputAspect) + 0.5;
-    } else {
-      q.x = (q.x - 0.5) * (outputAspect / sourceAspect) + 0.5;
+      float contentHeight = outputAspect / sourceAspect;
+      outside = outside || abs(p.y - 0.5) > 0.5 * contentHeight;
+      q.y = (p.y - (0.5 - 0.5 * contentHeight)) / max(contentHeight, 0.0001);
     }
   }
+  // 1 = FILL
+  else if (displayMode == 1) {
+    if (outputAspect > sourceAspect) {
+      q.y = (p.y - 0.5) * (sourceAspect / outputAspect) + 0.5;
+    } else {
+      q.x = (p.x - 0.5) * (outputAspect / sourceAspect) + 0.5;
+    }
+  }
+  // 2 = STRETCH -> q stays equal to p.
 
-  outside = outside || q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0;
-  if (outside) return vec4(0.0);
+  // DYNAMIC ZOOM + PAN
+  // At zoom 1.0, there is no available pan.
+  // As zoom increases, the pan range grows automatically so ±1.0
+  // always reaches the actual edge of the document.
+  float z = max(zoomValue, 0.05);
+  vec2 visibleSpan = vec2(1.0 / z);
 
+  // Maximum movement of the source-window center before its edge
+  // touches the edge of the PDF page.
+  vec2 maxPan = max(vec2(0.0), vec2(0.5) - visibleSpan * 0.5);
+
+  // Resolume slider remains normalized -1..+1, but the actual movement
+  // is dynamically scaled by zoom/document space.
+  vec2 pan = vec2(positionX, positionY) * maxPan;
+
+  q = (q - vec2(0.5)) / z + vec2(0.5) - pan;
+
+  outside = outside ||
+            q.x < 0.0 || q.x > 1.0 ||
+            q.y < 0.0 || q.y > 1.0;
+
+  if (outside)
+    return vec4(0.0);
+
+  // PDF/WIC rows are top-to-bottom.
   return texture(tex, vec2(q.x, 1.0 - q.y));
 }
 
