@@ -1,11 +1,13 @@
-#include "BRPdfReader.h"
-
+// Windows shell headers must be included before FFGL/GLEW headers.
 #include <windows.h>
-#include <commdlg.h>
+#include <shobjidl.h>
+
+#include "BRPdfReader.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 using namespace ffglex;
 
@@ -112,23 +114,45 @@ BRPdfReader::BRPdfReader() {
 BRPdfReader::~BRPdfReader() = default;
 
 void BRPdfReader::ChoosePdf() {
-  wchar_t filename[32768] = {};
-  OPENFILENAMEW dialog{};
-  dialog.lStructSize = sizeof(dialog);
-  dialog.lpstrFilter = L"PDF Documents (*.pdf)\0*.pdf\0All Files (*.*)\0*.*\0";
-  dialog.lpstrFile = filename;
-  dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
-  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
-  dialog.lpstrDefExt = L"pdf";
+  HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const bool uninitialize = SUCCEEDED(initHr);
 
-  if (!GetOpenFileNameW(&dialog))
+  IFileOpenDialog* dialog = nullptr;
+  HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr,
+                                CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&dialog));
+  if (FAILED(hr) || !dialog) {
+    if (uninitialize) CoUninitialize();
     return;
-
-  if (pdf_.Open(filename)) {
-    currentPage_ = 0;
-    params_[PT_AUTO_SLIDE] = 0.0f;
-    MarkPageChanged();
   }
+
+  const COMDLG_FILTERSPEC filters[] = {
+    { L"PDF Documents (*.pdf)", L"*.pdf" },
+    { L"All Files (*.*)", L"*.*" }
+  };
+  dialog->SetFileTypes(static_cast<UINT>(std::size(filters)), filters);
+  dialog->SetDefaultExtension(L"pdf");
+  dialog->SetTitle(L"BR PDF READER by Belajar Resolume - Choose PDF");
+
+  hr = dialog->Show(nullptr);
+  if (SUCCEEDED(hr)) {
+    IShellItem* item = nullptr;
+    if (SUCCEEDED(dialog->GetResult(&item)) && item) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+        if (pdf_.Open(path)) {
+          currentPage_ = 0;
+          params_[PT_AUTO_SLIDE] = 0.0f;
+          MarkPageChanged();
+        }
+        CoTaskMemFree(path);
+      }
+      item->Release();
+    }
+  }
+
+  dialog->Release();
+  if (uninitialize) CoUninitialize();
 }
 
 void BRPdfReader::MarkPageChanged() {

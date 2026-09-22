@@ -1,132 +1,108 @@
 #include "PdfRenderer.h"
 
 #include <windows.h>
-#include <roapi.h>
-#include <wrl.h>
-#include <wrl/wrappers/corewrappers.h>
-#include <windows.storage.h>
-#include <windows.data.pdf.h>
-#include <windows.storage.streams.h>
 #include <wincodec.h>
+#include <objidl.h>
+
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Storage.h>
+#include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.Data.Pdf.h>
 
 #include <algorithm>
-#include <chrono>
-#include <thread>
+#include <cstring>
 
-using Microsoft::WRL::ComPtr;
-using Microsoft::WRL::Wrappers::HString;
-
-using ABI::Windows::Storage::IStorageFile;
-using ABI::Windows::Storage::IStorageFileStatics;
-using ABI::Windows::Storage::FileAccessMode;
-using ABI::Windows::Storage::Streams::IRandomAccessStream;
-using ABI::Windows::Storage::Streams::IInMemoryRandomAccessStream;
-using ABI::Windows::Data::Pdf::IPdfDocument;
-using ABI::Windows::Data::Pdf::IPdfDocumentStatics;
-using ABI::Windows::Data::Pdf::IPdfPage;
-using ABI::Windows::Data::Pdf::IPdfPageRenderOptions;
+using namespace winrt;
+using namespace Windows::Storage;
+using namespace Windows::Storage::Streams;
+using namespace Windows::Data::Pdf;
 
 namespace {
-template <typename TAsync>
-bool WaitForAsync(TAsync* async) {
-  if (!async) return false;
-  AsyncStatus status = AsyncStatus::Started;
-  while (status == AsyncStatus::Started) {
-    if (FAILED(async->get_Status(&status))) return false;
-    if (status == AsyncStatus::Started)
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+bool DecodePngBytes(const std::vector<std::uint8_t>& png,
+                    std::vector<std::uint8_t>& bgra,
+                    int& width,
+                    int& height) {
+  if (png.empty()) return false;
+
+  IStream* rawStream = nullptr;
+  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, png.size());
+  if (!memory) return false;
+
+  void* ptr = GlobalLock(memory);
+  if (!ptr) {
+    GlobalFree(memory);
+    return false;
   }
-  return status == AsyncStatus::Completed;
-}
+  std::memcpy(ptr, png.data(), png.size());
+  GlobalUnlock(memory);
 
-bool OpenDocument(const std::wstring& path, ComPtr<IPdfDocument>& document) {
-  HString storageClass;
-  if (FAILED(storageClass.Set(RuntimeClass_Windows_Storage_StorageFile))) return false;
-
-  ComPtr<IStorageFileStatics> storageStatics;
-  if (FAILED(RoGetActivationFactory(storageClass.Get(), IID_PPV_ARGS(&storageStatics)))) return false;
-
-  HString filePath;
-  if (FAILED(filePath.Set(path.c_str()))) return false;
-
-  ComPtr<ABI::Windows::Foundation::IAsyncOperation<ABI::Windows::Storage::StorageFile*>> fileOp;
-  if (FAILED(storageStatics->GetFileFromPathAsync(filePath.Get(), &fileOp)) || !WaitForAsync(fileOp.Get()))
+  if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &rawStream)) || !rawStream) {
+    GlobalFree(memory);
     return false;
+  }
 
-  ComPtr<IStorageFile> file;
-  IStorageFile* fileRaw = nullptr;
-  if (FAILED(fileOp->GetResults(&fileRaw)) || !fileRaw) return false;
-  file.Attach(fileRaw);
+  winrt::com_ptr<IStream> stream;
+  stream.attach(rawStream);
 
-  ComPtr<ABI::Windows::Foundation::IAsyncOperation<ABI::Windows::Storage::Streams::IRandomAccessStream*>> streamOp;
-  if (FAILED(file->OpenAsync(FileAccessMode_Read, &streamOp)) || !WaitForAsync(streamOp.Get()))
-    return false;
-
-  ComPtr<IRandomAccessStream> stream;
-  IRandomAccessStream* streamRaw = nullptr;
-  if (FAILED(streamOp->GetResults(&streamRaw)) || !streamRaw) return false;
-  stream.Attach(streamRaw);
-
-  HString pdfClass;
-  if (FAILED(pdfClass.Set(RuntimeClass_Windows_Data_Pdf_PdfDocument))) return false;
-
-  ComPtr<IPdfDocumentStatics> pdfStatics;
-  if (FAILED(RoGetActivationFactory(pdfClass.Get(), IID_PPV_ARGS(&pdfStatics)))) return false;
-
-  ComPtr<ABI::Windows::Foundation::IAsyncOperation<ABI::Windows::Data::Pdf::PdfDocument*>> docOp;
-  if (FAILED(pdfStatics->LoadFromStreamAsync(stream.Get(), &docOp)) || !WaitForAsync(docOp.Get()))
-    return false;
-
-  IPdfDocument* docRaw = nullptr;
-  if (FAILED(docOp->GetResults(&docRaw)) || !docRaw) return false;
-  document.Attach(docRaw);
-  return true;
-}
-
-bool DecodePngStream(IStream* stream, std::vector<std::uint8_t>& bgra, int& width, int& height) {
-  ComPtr<IWICImagingFactory> factory;
+  winrt::com_ptr<IWICImagingFactory> factory;
   if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                              IID_PPV_ARGS(&factory)))) return false;
-
-  LARGE_INTEGER zero{};
-  stream->Seek(zero, STREAM_SEEK_SET, nullptr);
-
-  ComPtr<IWICBitmapDecoder> decoder;
-  if (FAILED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &decoder)))
+                              IID_PPV_ARGS(factory.put()))))
     return false;
 
-  ComPtr<IWICBitmapFrameDecode> frame;
-  if (FAILED(decoder->GetFrame(0, &frame))) return false;
+  winrt::com_ptr<IWICBitmapDecoder> decoder;
+  if (FAILED(factory->CreateDecoderFromStream(stream.get(), nullptr,
+                                              WICDecodeMetadataCacheOnLoad,
+                                              decoder.put())))
+    return false;
+
+  winrt::com_ptr<IWICBitmapFrameDecode> frame;
+  if (FAILED(decoder->GetFrame(0, frame.put())))
+    return false;
 
   UINT w = 0, h = 0;
-  if (FAILED(frame->GetSize(&w, &h)) || w == 0 || h == 0) return false;
+  if (FAILED(frame->GetSize(&w, &h)) || w == 0 || h == 0)
+    return false;
 
-  ComPtr<IWICFormatConverter> converter;
-  if (FAILED(factory->CreateFormatConverter(&converter))) return false;
+  winrt::com_ptr<IWICFormatConverter> converter;
+  if (FAILED(factory->CreateFormatConverter(converter.put())))
+    return false;
 
-  if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA,
-                                   WICBitmapDitherTypeNone, nullptr, 0.0,
-                                   WICBitmapPaletteTypeCustom))) return false;
+  if (FAILED(converter->Initialize(frame.get(),
+                                   GUID_WICPixelFormat32bppBGRA,
+                                   WICBitmapDitherTypeNone,
+                                   nullptr,
+                                   0.0,
+                                   WICBitmapPaletteTypeCustom)))
+    return false;
 
   const UINT stride = w * 4;
   bgra.resize(static_cast<size_t>(stride) * h);
-  if (FAILED(converter->CopyPixels(nullptr, stride,
-                                   static_cast<UINT>(bgra.size()), bgra.data())))
+
+  if (FAILED(converter->CopyPixels(nullptr,
+                                   stride,
+                                   static_cast<UINT>(bgra.size()),
+                                   bgra.data())))
     return false;
 
   width = static_cast<int>(w);
   height = static_cast<int>(h);
   return true;
 }
+
 }
 
 struct PdfRenderer::Impl {
-  ComPtr<IPdfDocument> document;
+  PdfDocument document{nullptr};
 };
 
 PdfRenderer::PdfRenderer() : impl_(new Impl) {
-  RoInitialize(RO_INIT_MULTITHREADED);
-  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  // C++/WinRT gracefully handles the case where the host already initialized COM.
+  try {
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+  } catch (...) {
+  }
 }
 
 PdfRenderer::~PdfRenderer() {
@@ -135,78 +111,92 @@ PdfRenderer::~PdfRenderer() {
 }
 
 bool PdfRenderer::Open(const std::wstring& path) {
-  Close();
-  ComPtr<IPdfDocument> document;
-  if (!OpenDocument(path, document)) return false;
+  try {
+    Close();
 
-  UINT32 count = 0;
-  if (FAILED(document->get_PageCount(&count)) || count == 0) return false;
+    StorageFile file = StorageFile::GetFileFromPathAsync(path).get();
+    PdfDocument document = PdfDocument::LoadFromFileAsync(file).get();
 
-  impl_->document = document;
-  path_ = path;
-  pageCount_ = count;
-  return true;
+    const unsigned count = document.PageCount();
+    if (count == 0)
+      return false;
+
+    impl_->document = document;
+    path_ = path;
+    pageCount_ = count;
+    return true;
+  } catch (...) {
+    Close();
+    return false;
+  }
 }
 
 void PdfRenderer::Close() {
-  if (impl_) impl_->document.Reset();
+  if (impl_)
+    impl_->document = nullptr;
   path_.clear();
   pageCount_ = 0;
 }
 
-bool PdfRenderer::IsOpen() const { return impl_ && impl_->document && pageCount_ > 0; }
-unsigned PdfRenderer::PageCount() const { return pageCount_; }
-const std::wstring& PdfRenderer::Path() const { return path_; }
+bool PdfRenderer::IsOpen() const {
+  return impl_ && impl_->document && pageCount_ > 0;
+}
+
+unsigned PdfRenderer::PageCount() const {
+  return pageCount_;
+}
+
+const std::wstring& PdfRenderer::Path() const {
+  return path_;
+}
 
 bool PdfRenderer::RenderPage(unsigned pageIndex,
                              unsigned targetHeight,
                              std::vector<std::uint8_t>& bgra,
                              int& width,
                              int& height) {
-  if (!IsOpen() || pageIndex >= pageCount_) return false;
-
-  ComPtr<IPdfPage> page;
-  if (FAILED(impl_->document->GetPage(pageIndex, &page)) || !page) return false;
-
-  ABI::Windows::Foundation::Size nativeSize{};
-  if (FAILED(page->get_Size(&nativeSize)) || nativeSize.Width <= 0 || nativeSize.Height <= 0)
+  if (!IsOpen() || pageIndex >= pageCount_)
     return false;
 
-  const unsigned outH = std::max(64u, targetHeight);
-  const unsigned outW = std::max(64u, static_cast<unsigned>(
-      nativeSize.Width * (static_cast<float>(outH) / nativeSize.Height)));
+  try {
+    PdfPage page = impl_->document.GetPage(pageIndex);
+    const auto nativeSize = page.Size();
 
-  HString memClass;
-  if (FAILED(memClass.Set(RuntimeClass_Windows_Storage_Streams_InMemoryRandomAccessStream)))
+    if (nativeSize.Width <= 0.0f || nativeSize.Height <= 0.0f)
+      return false;
+
+    const unsigned outH = std::max(64u, targetHeight);
+    const unsigned outW = std::max(
+      64u,
+      static_cast<unsigned>(
+        nativeSize.Width * (static_cast<float>(outH) / nativeSize.Height)
+      )
+    );
+
+    InMemoryRandomAccessStream stream;
+    PdfPageRenderOptions options;
+    options.DestinationWidth(outW);
+    options.DestinationHeight(outH);
+
+    page.RenderToStreamAsync(stream, options).get();
+
+    const std::uint64_t size64 = stream.Size();
+    if (size64 == 0 || size64 > 0x7fffffffULL)
+      return false;
+
+    const std::uint32_t size = static_cast<std::uint32_t>(size64);
+    IInputStream input = stream.GetInputStreamAt(0);
+
+    DataReader reader(input);
+    const std::uint32_t loaded = reader.LoadAsync(size).get();
+    if (loaded == 0)
+      return false;
+
+    std::vector<std::uint8_t> png(loaded);
+    reader.ReadBytes(png);
+
+    return DecodePngBytes(png, bgra, width, height);
+  } catch (...) {
     return false;
-
-  ComPtr<IInspectable> memInspectable;
-  if (FAILED(RoActivateInstance(memClass.Get(), &memInspectable))) return false;
-
-  ComPtr<IInMemoryRandomAccessStream> mem;
-  if (FAILED(memInspectable.As(&mem))) return false;
-
-  HString optionsClass;
-  if (FAILED(optionsClass.Set(RuntimeClass_Windows_Data_Pdf_PdfPageRenderOptions)))
-    return false;
-
-  ComPtr<IInspectable> optionsInspectable;
-  if (FAILED(RoActivateInstance(optionsClass.Get(), &optionsInspectable))) return false;
-
-  ComPtr<IPdfPageRenderOptions> options;
-  if (FAILED(optionsInspectable.As(&options))) return false;
-  options->put_DestinationWidth(outW);
-  options->put_DestinationHeight(outH);
-
-  ComPtr<ABI::Windows::Foundation::IAsyncAction> renderAction;
-  if (FAILED(page->RenderWithOptionsToStreamAsync(mem.Get(), options.Get(), &renderAction)) ||
-      !WaitForAsync(renderAction.Get()))
-    return false;
-
-  // Windows.Data.Pdf writes PNG into the random-access stream.
-  ComPtr<IStream> comStream;
-  if (FAILED(CreateStreamOverRandomAccessStream(mem.Get(), IID_PPV_ARGS(&comStream))))
-    return false;
-
-  return DecodePngStream(comStream.Get(), bgra, width, height);
+  }
 }
