@@ -13,16 +13,32 @@ jobs:
       - name: Checkout BR PDF READER
         uses: actions/checkout@v4
 
-      - name: Fetch stable Resolume FFGL SDK
+      - name: Fetch current Resolume FFGL SDK
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force external | Out-Null
-          git clone --depth 1 --branch v2.2 https://github.com/resolume/ffgl.git external/ffgl
+          if (Test-Path external/ffgl) { Remove-Item -Recurse -Force external/ffgl }
+          git clone --depth 1 https://github.com/resolume/ffgl.git external/ffgl
+
+          Write-Host "FFGL root contents:"
+          Get-ChildItem external/ffgl
+
+          if (-not (Test-Path external/ffgl/CMakeLists.txt)) {
+            throw "Current FFGL SDK CMakeLists.txt was not found at external/ffgl/CMakeLists.txt"
+          }
+
+      - name: Install GLEW
+        shell: powershell
+        run: |
+          vcpkg install glew:x64-windows-static
 
       - name: Configure
         shell: powershell
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
 
       - name: Build Release
         shell: powershell
@@ -35,8 +51,10 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           $dll = Get-ChildItem -Path build -Recurse -Filter BR_PDF_READER_FFGL.dll | Select-Object -First 1
           if (-not $dll) { throw "BR_PDF_READER_FFGL.dll was not produced." }
+
+          Write-Host "DLL found at: $($dll.FullName)"
           Copy-Item $dll.FullName dist/BR_PDF_READER_FFGL.dll
-          Compress-Archive -Path dist/BR_PDF_READER_FFGL.dll -DestinationPath dist/BR-PDF-READER-Windows-x64.zip
+          Compress-Archive -Path dist/BR_PDF_READER_FFGL.dll -DestinationPath dist/BR-PDF-READER-Windows-x64.zip -Force
 
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v4
