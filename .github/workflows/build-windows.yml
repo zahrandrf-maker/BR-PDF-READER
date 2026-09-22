@@ -19,18 +19,13 @@ jobs:
           New-Item -ItemType Directory -Force external | Out-Null
           if (Test-Path external/ffgl) { Remove-Item -Recurse -Force external/ffgl }
           git clone --depth 1 https://github.com/resolume/ffgl.git external/ffgl
-
-          Write-Host "FFGL root contents:"
-          Get-ChildItem external/ffgl
-
           if (-not (Test-Path external/ffgl/CMakeLists.txt)) {
-            throw "Current FFGL SDK CMakeLists.txt was not found at external/ffgl/CMakeLists.txt"
+            throw "FFGL SDK CMakeLists.txt not found."
           }
 
       - name: Install GLEW
         shell: powershell
-        run: |
-          vcpkg install glew:x64-windows-static
+        run: vcpkg install glew:x64-windows-static
 
       - name: Configure
         shell: powershell
@@ -42,17 +37,14 @@ jobs:
 
       - name: Build Release
         shell: powershell
-        run: |
-          cmake --build build --config Release --target BR_PDF_READER
+        run: cmake --build build --config Release --target BR_PDF_READER
 
-      - name: Find and package DLL
+      - name: Package DLL
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           $dll = Get-ChildItem -Path build -Recurse -Filter BR_PDF_READER_FFGL.dll | Select-Object -First 1
           if (-not $dll) { throw "BR_PDF_READER_FFGL.dll was not produced." }
-
-          Write-Host "DLL found at: $($dll.FullName)"
           Copy-Item $dll.FullName dist/BR_PDF_READER_FFGL.dll
           Compress-Archive -Path dist/BR_PDF_READER_FFGL.dll -DestinationPath dist/BR-PDF-READER-Windows-x64.zip -Force
 
