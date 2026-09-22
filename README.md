@@ -1,23 +1,33 @@
-# BR PDF Reader V1.4
+# BR PDF Reader V1.4.1 — Crash Fix
 
-Update utama:
-- Branding fixed: label **by** + value **Belajar Resolume**
-- Manual Slide Control mode: NORMAL / FADE / SLIDE UP / SLIDE DOWN / SLIDE LEFT / SLIDE RIGHT
-- Manual Speed: FAST / SLOW
-- Auto Slide mode terpisah dengan opsi yang sama
-- Auto Speed: FAST / SLOW
-- Interval 1–60 sec
-- Display: FIT / FILL / STRETCH
-- Transform:
-  - Zoom 25–400%
-  - Position X -1.00 sampai +1.00
-  - Position Y -1.00 sampai +1.00
+This hotfix keeps the V1.4 features but changes the plugin metadata so Resolume does not reuse the incompatible V1.3 parameter schema.
 
-Zoom / Position X / Position Y menggunakan FFGL standard ranged parameters sehingga Resolume menampilkan kontrol drag-slider dengan minus/plus seperti Interval.
+## Crash fixes
+- FFGL unique plugin ID changed from `BRP1` to `BRP2`.
+- Removed the experimental one-item Branding option parameter.
+- Manual and Auto transition parameters now have unique internal serialization names:
+  - Manual Mode / Manual Speed
+  - Auto Mode / Auto Speed
+  Resolume still displays them simply as Mode / Speed.
+- Branding is now static, non-interactive text in the section header:
+  `by Belajar Resolume | PDF FILE`
 
-Build:
-1. Replace isi repo dengan V1.4
-2. Commit ke main
-3. Actions > Build BR PDF READER > Run workflow
-4. Download artifact BR-PDF-READER-Windows-x64
-5. Extract BR_PDF_READER_FFGL.dll dan replace DLL lama di Extra Effects
+## Features retained
+- Previous / Next
+- Manual mode: NORMAL / FADE / SLIDE UP / DOWN / LEFT / RIGHT
+- Manual FAST / SLOW
+- Auto Slide 1–60 sec
+- Stop / Loop
+- Auto mode: NORMAL / FADE / SLIDE UP / DOWN / LEFT / RIGHT
+- Auto FAST / SLOW
+- FIT / FILL / STRETCH
+- Transform: Zoom / Position X / Position Y
+
+## IMPORTANT install test
+1. Close Resolume.
+2. Delete every older `BR_PDF_READER_FFGL.dll` copy from Extra Effects.
+3. Put only the V1.4.1 DLL in Extra Effects.
+4. Start Resolume.
+5. If Resolume opens, add BR PDF Reader as a new source and test controls.
+
+The new plugin ID is intentional: V1.4 changed parameter count/types significantly compared with V1.3, and reusing the old FFGL ID could make Resolume load stale parameter state.
