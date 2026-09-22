@@ -12,13 +12,13 @@ using namespace ffglex;
 
 static CFFGLPluginInfo PluginInfo(
   PluginFactory<BRPdfReader>,
-  "BRP1",
+  "BRP2",
   "BR PDF Reader",
   2, 1,
   1, 0,
   FF_SOURCE,
   "PDF reader and slideshow source for Resolume",
-  "BR PDF Reader V1.4"
+  "BR PDF Reader V1.4.1"
 );
 
 static const char* kVertexShader = R"(#version 410 core
@@ -133,16 +133,12 @@ BRPdfReader::BRPdfReader() {
   params_[PT_INTERVAL] = 5.0f;
   params_[PT_ZOOM] = 1.0f;
 
-  // Fixed branding row.
-  SetOptionParamInfo(PT_BRANDING, "by", 1, 0.0f);
-  SetParamElementInfo(PT_BRANDING, 0, "Belajar Resolume", 0.0f);
-
   SetParamInfo(PT_CHOOSE_PDF, "Choose PDF", FF_TYPE_EVENT, false);
 
   SetParamInfo(PT_PREVIOUS, "Previous", FF_TYPE_EVENT, false);
   SetParamInfo(PT_NEXT, "Next", FF_TYPE_EVENT, false);
 
-  SetOptionParamInfo(PT_MANUAL_TRANSITION, "Mode", 6, 0.0f);
+  SetOptionParamInfo(PT_MANUAL_TRANSITION, "Manual Mode", 6, 0.0f);
   SetParamElementInfo(PT_MANUAL_TRANSITION, 0, "NORMAL", 0.0f);
   SetParamElementInfo(PT_MANUAL_TRANSITION, 1, "FADE", 1.0f);
   SetParamElementInfo(PT_MANUAL_TRANSITION, 2, "SLIDE UP", 2.0f);
@@ -150,7 +146,7 @@ BRPdfReader::BRPdfReader() {
   SetParamElementInfo(PT_MANUAL_TRANSITION, 4, "SLIDE LEFT", 4.0f);
   SetParamElementInfo(PT_MANUAL_TRANSITION, 5, "SLIDE RIGHT", 5.0f);
 
-  SetOptionParamInfo(PT_MANUAL_SPEED, "Speed", 2, 0.0f);
+  SetOptionParamInfo(PT_MANUAL_SPEED, "Manual Speed", 2, 0.0f);
   SetParamElementInfo(PT_MANUAL_SPEED, 0, "FAST", 0.0f);
   SetParamElementInfo(PT_MANUAL_SPEED, 1, "SLOW", 1.0f);
 
@@ -162,7 +158,7 @@ BRPdfReader::BRPdfReader() {
   SetParamElementInfo(PT_END_MODE, 0, "Stop at Last Page", 0.0f);
   SetParamElementInfo(PT_END_MODE, 1, "Loop to First Page", 1.0f);
 
-  SetOptionParamInfo(PT_AUTO_TRANSITION, "Mode", 6, 0.0f);
+  SetOptionParamInfo(PT_AUTO_TRANSITION, "Auto Mode", 6, 0.0f);
   SetParamElementInfo(PT_AUTO_TRANSITION, 0, "NORMAL", 0.0f);
   SetParamElementInfo(PT_AUTO_TRANSITION, 1, "FADE", 1.0f);
   SetParamElementInfo(PT_AUTO_TRANSITION, 2, "SLIDE UP", 2.0f);
@@ -170,9 +166,16 @@ BRPdfReader::BRPdfReader() {
   SetParamElementInfo(PT_AUTO_TRANSITION, 4, "SLIDE LEFT", 4.0f);
   SetParamElementInfo(PT_AUTO_TRANSITION, 5, "SLIDE RIGHT", 5.0f);
 
-  SetOptionParamInfo(PT_AUTO_SPEED, "Speed", 2, 0.0f);
+  SetOptionParamInfo(PT_AUTO_SPEED, "Auto Speed", 2, 0.0f);
   SetParamElementInfo(PT_AUTO_SPEED, 0, "FAST", 0.0f);
   SetParamElementInfo(PT_AUTO_SPEED, 1, "SLOW", 1.0f);
+
+  // Keep internal parameter names unique for Resolume serialization,
+  // but show the compact labels requested in the UI.
+  SetParamDisplayName(PT_MANUAL_TRANSITION, "Mode", false);
+  SetParamDisplayName(PT_MANUAL_SPEED, "Speed", false);
+  SetParamDisplayName(PT_AUTO_TRANSITION, "Mode", false);
+  SetParamDisplayName(PT_AUTO_SPEED, "Speed", false);
 
   SetOptionParamInfo(PT_DISPLAY_MODE, "Display Mode", 3, 0.0f);
   SetParamElementInfo(PT_DISPLAY_MODE, 0, "FIT", 0.0f);
@@ -188,8 +191,7 @@ BRPdfReader::BRPdfReader() {
   SetParamInfo(PT_POS_Y, "Position Y", FF_TYPE_STANDARD, 0.0f);
   SetParamRange(PT_POS_Y, -1.0f, 1.0f);
 
-  SetParamGroup(PT_BRANDING, "BRANDING");
-  SetParamGroup(PT_CHOOSE_PDF, "PDF FILE");
+  SetParamGroup(PT_CHOOSE_PDF, "by Belajar Resolume | PDF FILE");
 
   SetParamGroup(PT_PREVIOUS, "SLIDE CONTROL");
   SetParamGroup(PT_NEXT, "SLIDE CONTROL");
@@ -498,11 +500,6 @@ FFResult BRPdfReader::DeInitGL() {
 FFResult BRPdfReader::SetFloatParameter(unsigned int index, float value) {
   if (index >= PT_COUNT) return FF_FAIL;
 
-  if (index == PT_BRANDING) {
-    params_[PT_BRANDING] = 0.0f;
-    return FF_SUCCESS;
-  }
-
   params_[index] = value;
 
   if (index == PT_CHOOSE_PDF && value > 0.5f) ChoosePdf();
@@ -519,7 +516,6 @@ FFResult BRPdfReader::SetFloatParameter(unsigned int index, float value) {
 
 float BRPdfReader::GetFloatParameter(unsigned int index) {
   if (index >= PT_COUNT) return 0.0f;
-  if (index == PT_BRANDING) return 0.0f;
   return params_[index];
 }
 

@@ -22,8 +22,7 @@ public:
 
 private:
   enum Param : unsigned int {
-    PT_BRANDING = 0,
-    PT_CHOOSE_PDF,
+    PT_CHOOSE_PDF = 0,
     PT_PREVIOUS,
     PT_NEXT,
     PT_MANUAL_TRANSITION,
